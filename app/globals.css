@@ -1,0 +1,542 @@
+:root {
+  /* Barbershop palette — deep signage blue, warm brass, cream, oxblood */
+  --ink: #10233b;          /* deep barber blue-black */
+  --navy: #1b3a5f;         /* signage blue */
+  --brass: #c8952f;        /* brass / amber accent */
+  --brass-bright: #e0aa3e;
+  --cream: #f6f1e7;        /* warm off-white */
+  --cream-deep: #ece3d2;
+  --oxblood: #8f2d2d;      /* the "you're missing out" red */
+  --oxblood-bright: #b23b3b;
+  --paper: #fbf8f2;
+  --muted: #6b7280;
+  --line: rgba(16, 35, 59, 0.12);
+  --green: #2f6b4f;
+
+  --shadow-sm: 0 1px 2px rgba(16, 35, 59, 0.08);
+  --shadow-md: 0 6px 24px rgba(16, 35, 59, 0.12);
+  --shadow-lg: 0 18px 50px rgba(16, 35, 59, 0.18);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  color: var(--ink);
+  background: var(--cream);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+.display {
+  font-family: "Oswald", "Inter", sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  line-height: 1.02;
+  font-weight: 700;
+}
+
+/* --- Barber pole stripe motif, used as a thin accent bar --- */
+.pole-stripe {
+  height: 6px;
+  width: 100%;
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--navy) 0 14px,
+    var(--cream) 14px 28px,
+    var(--oxblood) 28px 42px,
+    var(--cream) 42px 56px
+  );
+  background-size: 79px 6px;
+}
+
+/* ---------- Layout shell ---------- */
+.wrap {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 0 22px;
+}
+
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- Header ---------- */
+.masthead {
+  padding: 22px 0 0;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  justify-content: center;
+}
+.brand-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 7px;
+  background: var(--navy);
+  position: relative;
+  overflow: hidden;
+  flex: none;
+  box-shadow: var(--shadow-sm);
+}
+.brand-mark::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--cream) 0 5px,
+    var(--oxblood) 5px 10px,
+    var(--cream) 10px 15px,
+    var(--navy) 15px 20px
+  );
+  opacity: 0.95;
+}
+.brand-name {
+  font-family: "Oswald", sans-serif;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 21px;
+  color: var(--ink);
+}
+
+/* ---------- Hero ---------- */
+.hero {
+  text-align: center;
+  padding: 46px 0 30px;
+}
+.eyebrow {
+  font-family: "Oswald", sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--brass);
+  margin-bottom: 18px;
+}
+.hero h1 {
+  font-family: "Oswald", sans-serif;
+  text-transform: uppercase;
+  font-weight: 700;
+  font-size: clamp(34px, 6.6vw, 58px);
+  line-height: 0.98;
+  letter-spacing: 0.005em;
+  color: var(--ink);
+}
+.hero h1 .hl {
+  color: var(--oxblood);
+  display: inline-block;
+}
+.hero p.sub {
+  max-width: 540px;
+  margin: 20px auto 0;
+  font-size: 17.5px;
+  color: #33465c;
+}
+
+/* ---------- Scan card ---------- */
+.card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+.card-inner {
+  padding: 30px 28px 32px;
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.field label {
+  display: block;
+  font-family: "Oswald", sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--navy);
+  margin-bottom: 7px;
+}
+.field input {
+  width: 100%;
+  padding: 14px 15px;
+  font-size: 16px;
+  font-family: "Inter", sans-serif;
+  color: var(--ink);
+  background: #fff;
+  border: 1.5px solid var(--line);
+  border-radius: 10px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.field input:focus {
+  outline: none;
+  border-color: var(--navy);
+  box-shadow: 0 0 0 3px rgba(27, 58, 95, 0.13);
+}
+.field input::placeholder {
+  color: #9aa4b0;
+}
+
+.btn {
+  font-family: "Oswald", sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  font-size: 16px;
+  border: none;
+  border-radius: 10px;
+  padding: 15px 22px;
+  cursor: pointer;
+  transition: transform 0.08s, background 0.15s, box-shadow 0.15s;
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn-primary {
+  background: var(--oxblood);
+  color: #fff;
+  width: 100%;
+  box-shadow: var(--shadow-sm);
+}
+.btn-primary:hover {
+  background: var(--oxblood-bright);
+}
+.btn-primary:disabled {
+  background: #b8a99a;
+  cursor: not-allowed;
+}
+.btn-ghost {
+  background: transparent;
+  color: var(--navy);
+  border: 1.5px solid var(--line);
+}
+.btn-ghost:hover {
+  border-color: var(--navy);
+}
+
+.hint {
+  text-align: center;
+  color: var(--muted);
+  font-size: 13.5px;
+  margin-top: 15px;
+}
+.hint.err {
+  color: var(--oxblood);
+  font-weight: 500;
+}
+
+/* ---------- Loading ---------- */
+.loading {
+  padding: 40px 28px;
+  text-align: center;
+}
+.loading .spinner {
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 22px;
+  border-radius: 50%;
+  border: 4px solid var(--cream-deep);
+  border-top-color: var(--oxblood);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.loading .status {
+  font-family: "Oswald", sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 15px;
+  color: var(--navy);
+  min-height: 22px;
+}
+.loading .sub {
+  color: var(--muted);
+  font-size: 14px;
+  margin-top: 8px;
+}
+
+/* ---------- Results ---------- */
+.result-head {
+  text-align: center;
+  padding: 30px 28px 8px;
+}
+.score-ring {
+  width: 132px;
+  height: 132px;
+  margin: 0 auto 6px;
+  position: relative;
+}
+.score-ring .num {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.score-ring .num b {
+  font-family: "Oswald", sans-serif;
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink);
+}
+.score-ring .num span {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-top: 3px;
+}
+.verdict {
+  font-family: "Oswald", sans-serif;
+  text-transform: uppercase;
+  font-weight: 700;
+  font-size: 22px;
+  margin-top: 10px;
+}
+.verdict.bad { color: var(--oxblood); }
+.verdict.mid { color: var(--brass); }
+.verdict.good { color: var(--green); }
+.verdict-sub {
+  color: #33465c;
+  font-size: 15.5px;
+  max-width: 460px;
+  margin: 8px auto 0;
+}
+
+.models {
+  padding: 20px 28px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+}
+.model-row .name {
+  font-family: "Oswald", sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  font-size: 15px;
+}
+.model-row .tag {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 11px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+.tag.miss { background: rgba(143,45,45,0.1); color: var(--oxblood); }
+.tag.some { background: rgba(200,149,47,0.15); color: #9a6f16; }
+.tag.hit  { background: rgba(47,107,79,0.13); color: var(--green); }
+.tag.na   { background: rgba(107,114,128,0.12); color: var(--muted); }
+
+.competitors {
+  margin: 18px 28px 0;
+  padding: 18px 20px;
+  background: var(--ink);
+  border-radius: 12px;
+  color: var(--cream);
+}
+.competitors h3 {
+  font-family: "Oswald", sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--brass-bright);
+  margin-bottom: 12px;
+}
+.competitors ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.competitors li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+}
+.competitors li .dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--brass); flex: none;
+}
+.competitors .none {
+  font-size: 14px; color: rgba(246,241,231,0.7);
+}
+
+/* ---------- Lead capture ---------- */
+.lead {
+  margin: 22px 28px 30px;
+  padding: 24px 22px;
+  background: linear-gradient(160deg, var(--navy), var(--ink));
+  border-radius: 14px;
+  color: var(--cream);
+  text-align: center;
+}
+.lead h3 {
+  font-family: "Oswald", sans-serif;
+  text-transform: uppercase;
+  font-weight: 700;
+  font-size: 21px;
+  letter-spacing: 0.01em;
+}
+.lead p {
+  font-size: 15px;
+  color: rgba(246,241,231,0.85);
+  max-width: 420px;
+  margin: 9px auto 18px;
+}
+.lead .fields {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  max-width: 380px;
+  margin: 0 auto;
+}
+.lead input {
+  width: 100%;
+  padding: 13px 15px;
+  font-size: 15.5px;
+  border: 1.5px solid rgba(246,241,231,0.25);
+  border-radius: 9px;
+  background: rgba(255,255,255,0.06);
+  color: #fff;
+  font-family: "Inter", sans-serif;
+}
+.lead input::placeholder { color: rgba(246,241,231,0.55); }
+.lead input:focus {
+  outline: none;
+  border-color: var(--brass);
+  background: rgba(255,255,255,0.1);
+}
+.lead .btn-primary {
+  background: var(--brass);
+  color: var(--ink);
+  margin-top: 3px;
+}
+.lead .btn-primary:hover { background: var(--brass-bright); }
+.lead .microcopy {
+  font-size: 12.5px;
+  color: rgba(246,241,231,0.6);
+  margin-top: 12px;
+}
+.lead.done {
+  background: linear-gradient(160deg, var(--green), #24513c);
+}
+
+.restart {
+  text-align: center;
+  padding: 4px 0 34px;
+}
+.restart button {
+  background: none;
+  border: none;
+  color: var(--navy);
+  font-size: 14px;
+  cursor: pointer;
+  text-decoration: underline;
+  font-family: "Inter", sans-serif;
+}
+
+/* ---------- How it works strip ---------- */
+.how {
+  padding: 30px 0 10px;
+}
+.how h2 {
+  text-align: center;
+  font-family: "Oswald", sans-serif;
+  text-transform: uppercase;
+  font-size: 15px;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  margin-bottom: 22px;
+  font-weight: 600;
+}
+.steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+.step {
+  text-align: center;
+  padding: 18px 14px;
+}
+.step .n {
+  font-family: "Oswald", sans-serif;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--brass);
+  line-height: 1;
+}
+.step h4 {
+  font-family: "Oswald", sans-serif;
+  text-transform: uppercase;
+  font-size: 14px;
+  letter-spacing: 0.03em;
+  margin: 9px 0 5px;
+  color: var(--ink);
+}
+.step p {
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+/* ---------- Footer ---------- */
+.foot {
+  margin-top: auto;
+  padding: 34px 0 26px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+.foot .disc {
+  max-width: 520px;
+  margin: 0 auto 10px;
+  font-size: 12px;
+  color: #9aa4b0;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 560px) {
+  .steps { grid-template-columns: 1fr; gap: 6px; }
+  .card-inner { padding: 24px 18px 26px; }
+  .models, .competitors, .lead, .result-head { margin-left: 0; margin-right: 0; }
+  .models { padding-left: 18px; padding-right: 18px; }
+  .competitors { margin: 18px 18px 0; }
+  .lead { margin: 22px 18px 26px; }
+  .result-head { padding: 26px 18px 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; scroll-behavior: auto; }
+}
