@@ -74,49 +74,127 @@ function isMentioned(responseText, shopName) {
   return false;
 }
 
-// Extract a shortlist of competitor names the model recommended, for display.
-// This is a light heuristic — we look for capitalised multi-word names in the
-// original (non-normalised) text. Kept deliberately simple and defensive.
+// Extract a shortlist of competitor barbershop names the model recommended.
+//
+// AI models almost always present recommendations as a list where the name is
+// the emphasised lead of each item, e.g.:
+//   "1. **Sharp & Co Barbers** - known for fades"
+//   "- Aatos Barbershop: great for walk-ins"
+//   "* The Gentleman's Cut — classic cuts"
+// So instead of grabbing any capitalised phrase (which catches place names and
+// stray words), we look specifically for the lead name of each list item and
+// then filter hard against non-business phrases.
 function extractCompetitors(responseText, shopName, max = 3) {
   if (!responseText) return [];
   const selfCore = normalise(shopName);
-  const found = [];
-  // Match sequences like "Sharp Edge Barbers" or "The Gentleman's Cut".
-  const regex = /([A-Z][a-zA-Z'&]+(?:\s+(?:[A-Z][a-zA-Z'&]+|the|of|and|&|for)){0,3})/g;
-  const matches = responseText.match(regex) || [];
-  for (const m of matches) {
-    const clean = m.trim();
-    const n = normalise(clean);
-    // Skip short/junk matches, self-mentions, and obvious non-names.
-    if (clean.length < 4) continue;
-    if (n === selfCore || (selfCore && n.includes(selfCore))) continue;
-    // Skip common sentence-starter words that get capitalised.
-    const firstWord = n.split(" ")[0];
-    const skipWords = new Set([
-      "here", "there", "these", "those", "some", "many", "several", "based",
-      "however", "note", "please", "while", "although", "if", "when", "for",
-      "you", "your", "they", "this", "that", "one", "two", "three", "first",
-      "second", "another", "additionally", "unfortunately", "i", "as", "in",
-      "to", "the", "a", "an", "google", "reviews", "review", "reddit",
+
+  // Words/phrases that indicate something is NOT a shop name (areas, directions,
+  // generic descriptors, common list intros).
+  const banned = new Set([
+    "north", "south", "east", "west", "central", "greater", "the",
+    "london", "city", "town", "area", "areas", "nearby", "near", "local",
+    "locals", "region", "district", "borough", "neighbourhood", "neighborhood",
+    "check", "note", "here", "there", "these", "those", "some", "many",
+    "several", "based", "however", "please", "while", "although", "google",
+    "reviews", "review", "reddit", "yelp", "recommendation", "recommendations",
+    "option", "options", "consider", "additionally", "unfortunately", "overall",
+    "best", "top", "popular", "great", "good", "reputable", "known", "barbershops",
+    "barbers", "haircuts", "services", "prices", "booking", "online", "walk",
+  ]);
+
+  // Common generic multi-word phrases to reject outright (normalised).
+  const bannedPhrases = new Set([
+    "local barbershops", "local barbers", "north london", "south london",
+    "east london", "west london", "central london", "greater london",
+    "the area", "your area", "this area", "the city", "walk ins", "walk in",
+    "google reviews", "customer reviews", "opening hours", "book online",
+  ]);
+
+  const candidates = [];
+
+  // Split into lines and pull the "lead name" from each list-style line.
+  const lines = responseText.split(/\r?\n/);
+  for (const line of lines) {
+    let l = line.trim();
+    if (!l) continue;
+
+    // Strip common list markers: "1.", "2)", "-", "*", "•"
+    l = l.replace(/^\s*(?:\d+[.)]|[-*•])\s*/, "");
+
+    // Take the part before the first separator (–, -, :, —, or a comma that
+    // precedes a description). The name is almost always first.
+    let namePart = l.split(/\s+[–—-]\s+|:\s+/)[0].trim();
+
+    // Remove markdown emphasis markers ** __ around the name.
+    namePart = namePart.replace(/[*_`#]/g, "").trim();
+
+    // Cut off trailing description that sometimes follows without a separator
+    // (keep at most the first 5 words — real shop names are short).
+    const words = namePart.split(/\s+/).filter(Boolean);
+    if (words.length > 6) continue; // whole line, not a name — skip
+    const name = words.join(" ").trim();
+
+    if (name.length < 3 || name.length > 45) continue;
+
+    const n = normalise(name);
+    if (!n) continue;
+
+    // Reject self-mentions.
+    if (n === selfCore || (selfCore && (n.includes(selfCore) || selfCore.includes(n)))) continue;
+
+    // Reject banned exact phrases.
+    if (bannedPhrases.has(n)) continue;
+
+    // The name must contain at least one capitalised word (proper noun).
+    const hasCap = /[A-Z]/.test(name);
+    if (!hasCap) continue;
+
+    // Reject if EVERY significant word is banned (i.e. it's just area/generic words).
+    const nWords = n.split(" ").filter((w) => w.length > 1);
+    const meaningful = nWords.filter((w) => !banned.has(w));
+    if (meaningful.length === 0) continue;
+
+    // Reject if it's a single banned word or a bare place/direction.
+    if (nWords.length === 1 && banned.has(nWords[0])) continue;
+
+    // Reject sentence fragments: if the phrase contains common verbs/filler,
+    // it's a description, not a name.
+    const fragmentWords = new Set([
+      "are", "is", "was", "has", "have", "offers", "provides", "listings",
+      "plentiful", "many", "options", "here", "available", "located", "found",
+      "include", "includes", "such", "well", "very", "quite", "also", "more",
     ]);
-    if (skipWords.has(firstWord)) continue;
-    // Must look like a business name (contain a barber/cut/grooming hint OR be title case multi-word).
-    if (!found.some((f) => normalise(f) === n)) {
-      found.push(clean);
-    }
-    if (found.length >= max * 2) break;
+    if (nWords.some((w) => fragmentWords.has(w))) continue;
+
+    // Require at least one "strong" proper-noun-ish word: a capitalised word
+    // that isn't a banned area/generic term. This is the key filter that keeps
+    // real names ("Fade Factory") and drops area phrases ("North London").
+    const rawWords = name.split(/\s+/);
+    const strongProperNoun = rawWords.some((w) => {
+      const clean = w.replace(/[^\w&]/g, "");
+      if (clean.length < 2) return false;
+      const isCap = /^[A-Z]/.test(clean);
+      return isCap && !banned.has(clean.toLowerCase());
+    });
+    if (!strongProperNoun) continue;
+
+    candidates.push(name);
   }
-  // Prefer names that hint at being a barbershop.
-  const hints = ["barber", "cut", "fade", "grooming", "gents", "chair", "blade", "razor", "trim"];
-  const scored = found
-    .map((name) => ({
-      name,
-      score: hints.some((h) => normalise(name).includes(h)) ? 1 : 0,
-    }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, max)
-    .map((x) => x.name);
-  return scored;
+
+  // Score: prefer names that look like barbershops, then de-duplicate.
+  const hints = ["barber", "cut", "cutz", "fade", "grooming", "gents",
+    "chair", "blade", "razor", "trim", "clipper", "sharp", "shave", "co"];
+  const seen = new Set();
+  const scored = [];
+  for (const name of candidates) {
+    const n = normalise(name);
+    if (seen.has(n)) continue;
+    seen.add(n);
+    const score = hints.some((h) => n.includes(h)) ? 1 : 0;
+    scored.push({ name, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, max).map((x) => x.name);
 }
 
 // --- Individual model callers. Each returns { text } or throws. ---
@@ -166,22 +244,47 @@ async function callAnthropic(query) {
 async function callGemini(query) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("no key");
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: query }] }],
-      }),
+
+  // Try a few model names for resilience across API versions.
+  const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+  let lastErr = "";
+
+  for (const model of models) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            // Newer AI Studio keys authenticate via this header.
+            "x-goog-api-key": key,
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: query }] }],
+          }),
+        }
+      );
+      if (!res.ok) {
+        const body = await res.text();
+        lastErr = `gemini ${res.status} (${model}): ${body.slice(0, 200)}`;
+        // 404 = model name not found for this key; try the next model.
+        // Other errors (403/400) usually apply to all models, so break early.
+        if (res.status === 404) continue;
+        throw new Error(lastErr);
+      }
+      const data = await res.json();
+      return (
+        data.candidates?.[0]?.content?.parts
+          ?.map((p) => p.text || "")
+          .join("\n") || ""
+      );
+    } catch (e) {
+      lastErr = e.message || String(e);
+      // Network-level failure: try next model.
     }
-  );
-  if (!res.ok) throw new Error(`gemini ${res.status}`);
-  const data = await res.json();
-  return (
-    data.candidates?.[0]?.content?.parts?.map((p) => p.text || "").join("\n") ||
-    ""
-  );
+  }
+  throw new Error(lastErr || "gemini failed");
 }
 
 async function callPerplexity(query) {
@@ -247,6 +350,7 @@ export async function POST(req) {
             ok: true,
           });
         } catch (e) {
+          console.error(`MODEL_ERROR [${model.label}]:`, e?.message || String(e));
           perQuery.push({ query: q, mentioned: false, competitors: [], ok: false });
         }
       }
