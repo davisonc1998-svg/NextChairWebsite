@@ -100,6 +100,12 @@ function extractCompetitors(responseText, shopName, max = 3) {
     "option", "options", "consider", "additionally", "unfortunately", "overall",
     "best", "top", "popular", "great", "good", "reputable", "known", "barbershops",
     "barbers", "haircuts", "services", "prices", "booking", "online", "walk",
+    // Days, contact labels, map/hours references — common in Gemini output.
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
+    "sunday", "contact", "phone", "tel", "telephone", "hours", "opening",
+    "address", "maps", "map", "website", "email", "call", "directions",
+    "rating", "ratings", "stars", "star", "closed", "open", "appointment",
+    "appointments", "location", "locations", "price", "cost", "from", "to",
   ]);
 
   // Common generic multi-word phrases to reject outright (normalised).
@@ -108,6 +114,8 @@ function extractCompetitors(responseText, shopName, max = 3) {
     "east london", "west london", "central london", "greater london",
     "the area", "your area", "this area", "the city", "walk ins", "walk in",
     "google reviews", "customer reviews", "opening hours", "book online",
+    "google maps", "monday friday", "monday saturday", "opening times",
+    "phone number", "contact number", "getting there", "how to",
   ]);
 
   const candidates = [];
@@ -121,12 +129,30 @@ function extractCompetitors(responseText, shopName, max = 3) {
     // Strip common list markers: "1.", "2)", "-", "*", "•"
     l = l.replace(/^\s*(?:\d+[.)]|[-*•])\s*/, "");
 
+    // Skip "label: value" lines where the label is a field name (Contact:,
+    // Hours:, Address:, Phone:, etc.) — the text before the colon is not a shop.
+    const colonMatch = l.match(/^([A-Za-z][A-Za-z\s]{0,15}?):\s/);
+    if (colonMatch) {
+      const label = normalise(colonMatch[1]);
+      const labelFields = new Set([
+        "contact", "phone", "tel", "telephone", "hours", "opening",
+        "opening hours", "address", "website", "email", "rating", "ratings",
+        "location", "directions", "price", "prices", "note", "notes", "tip",
+        "tips", "hint", "why", "services", "specialties", "specialities",
+      ]);
+      if (labelFields.has(label)) continue;
+    }
+
     // Take the part before the first separator (–, -, :, —, or a comma that
     // precedes a description). The name is almost always first.
     let namePart = l.split(/\s+[–—-]\s+|:\s+/)[0].trim();
 
     // Remove markdown emphasis markers ** __ around the name.
     namePart = namePart.replace(/[*_`#]/g, "").trim();
+
+    // Reject anything containing digits — phone numbers, addresses, times,
+    // ratings ("4.5 stars"), price ("£15"). Real shop names rarely need them.
+    if (/\d/.test(namePart)) continue;
 
     // Cut off trailing description that sometimes follows without a separator
     // (keep at most the first 5 words — real shop names are short).
@@ -144,6 +170,14 @@ function extractCompetitors(responseText, shopName, max = 3) {
 
     // Reject banned exact phrases.
     if (bannedPhrases.has(n)) continue;
+
+    // Reject if the candidate contains a map/directory/action reference anywhere.
+    const junkSubstrings = [
+      "google maps", "google map", "find them", "find it", "visit them",
+      "check google", "on google", "see google", "book now", "call now",
+      "more options", "click here", "learn more",
+    ];
+    if (junkSubstrings.some((j) => n.includes(j))) continue;
 
     // The name must contain at least one capitalised word (proper noun).
     const hasCap = /[A-Z]/.test(name);
