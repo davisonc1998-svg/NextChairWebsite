@@ -326,6 +326,90 @@ const MODELS = [
   { id: "perplexity", label: "Perplexity", call: callPerplexity },
 ];
 
+// --- Google Places verification ---------------------------------------------
+// Each AI-suggested competitor is checked against Google Places. We keep a name
+// only if Places finds a real, currently-operational business matching that name
+// near the searched town. This drops hallucinated shops and wrong-city results.
+//
+// Uses the Places API (New) Text Search endpoint. Fails safe: if the key is
+// missing or a lookup errors, that candidate is dropped (better blank than wrong).
+async function verifyCompetitor(name, town) {
+  const key = process.env.GOOGLE_PLACES_API_KEY;
+  if (!key) return null; // No key → can't verify → drop (fail safe).
+
+  try {
+    const res = await fetch(
+      "https://places.googleapis.com/v1/places:searchText",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": key,
+          // Ask only for the fields we need, to keep cost/response small.
+          "X-Goog-FieldMask":
+            "places.displayName,places.formattedAddress,places.businessStatus,places.location",
+        },
+        body: JSON.stringify({
+          textQuery: `${name} barber ${town}`,
+          maxResultCount: 1,
+          languageCode: "en",
+        }),
+      }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const place = data.places?.[0];
+    if (!place) return null; // Not found on Places → almost certainly not real.
+
+    // Must be operational (not permanently/temporarily closed).
+    if (place.businessStatus && place.businessStatus !== "OPERATIONAL") {
+      return null;
+    }
+
+    const address = (place.formattedAddress || "").toLowerCase();
+    const townLc = town.toLowerCase().trim();
+
+    // Location sanity check: the town the user searched should appear somewhere
+    // in the verified address. Handles "Islington, London" by checking each part.
+    const townParts = townLc.split(/[,\s]+/).filter((p) => p.length >= 3);
+    const townMatches =
+      townParts.length === 0 ||
+      townParts.some((part) => address.includes(part));
+
+    if (!townMatches) return null; // Real business, but wrong location → drop.
+
+    // Return the canonical name Google has, which is cleaner than the AI's text.
+    return place.displayName?.text || name;
+  } catch (e) {
+    console.error("PLACES_VERIFY_ERROR:", e?.message || String(e));
+    return null; // Fail safe.
+  }
+}
+
+// Verify a list of candidate competitors in parallel, preserving order and
+// de-duplicating by the canonical name Google returns.
+async function verifyCompetitors(candidates, town) {
+  const results = await Promise.all(
+    candidates.map(async (c) => ({
+      original: c.name,
+      count: c.count,
+      verified: await verifyCompetitor(c.name, town),
+    }))
+  );
+
+  const seen = new Set();
+  const out = [];
+  for (const r of results) {
+    if (!r.verified) continue;
+    const key = r.verified.toLowerCase().trim();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ name: r.verified, count: r.count });
+  }
+  return out;
+}
+// ---------------------------------------------------------------------------
+
 export async function POST(req) {
   // Rate-limit before doing any paid API work.
   const ip = getClientIp(req);
@@ -415,10 +499,16 @@ export async function POST(req) {
       }
     }
   }
-  const topCompetitors = Object.entries(compCount)
+  // Build candidate list (take more than 5, since verification will drop some).
+  const candidateCompetitors = Object.entries(compCount)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
+    .slice(0, 10)
     .map(([name, count]) => ({ name, count }));
+
+  // Verify each candidate is a real, operational business in the searched town.
+  // Hallucinated or wrong-city names are dropped (fail safe → blank not wrong).
+  const verified = await verifyCompetitors(candidateCompetitors, town);
+  const topCompetitors = verified.slice(0, 5);
 
   const availableModels = modelResults.filter((m) => m.available);
   const totalChecks = availableModels.reduce((s, m) => s + m.answeredQueries, 0);
