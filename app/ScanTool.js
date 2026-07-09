@@ -141,10 +141,10 @@ export default function ScanTool() {
   const pct = total > 0 ? mentions / total : 0;
   const verdict =
     pct === 0
-      ? { cls: "bad", label: "You're invisible to AI", sub: "When locals ask AI for the best barber near you, your shop isn't coming up at all. Your competitors are getting those customers." }
+      ? { cls: "bad", label: "You're invisible to AI", sub: "When locals ask AI for the best barber near you, your shop isn't coming up at all — so those customers never hear your name." }
       : pct < 0.5
-      ? { cls: "mid", label: "You're barely showing up", sub: "You appear sometimes — but you're being left out of most AI recommendations, and rivals are filling the gap." }
-      : { cls: "good", label: "You're on AI's radar", sub: "You're being recommended fairly often. There's still room to lock in the top spot before competitors catch up." };
+      ? { cls: "mid", label: "You're barely showing up", sub: "You come up sometimes, but you're being left out of most AI recommendations — so a lot of nearby customers never hear your name." }
+      : { cls: "good", label: "You're on AI's radar", sub: "You're being recommended fairly often. There's still room to lock in the top spot and come up more consistently." };
 
   function modelTag(m) {
     if (!m.available) return { cls: "na", text: "No response" };
@@ -269,20 +269,29 @@ export default function ScanTool() {
             </div>
 
             <div className="competitors">
-              <h3>Who AI recommended instead</h3>
+              <h3>Local barbers AI names when asked</h3>
               {result.topCompetitors && result.topCompetitors.length > 0 ? (
-                <ul>
-                  {result.topCompetitors.map((c, i) => (
-                    <li key={i}>
-                      <span className="dot" />
-                      {c.name}
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <ul>
+                    {result.topCompetitors.map((c, i) => (
+                      <li key={i}>
+                        <span className="dot" />
+                        {c.name}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="comp-note">
+                    These are real, local shops AI has suggested to people asking
+                    for a barber near you. AI answers change from day to day — the
+                    point is simple: right now these names come up, and getting
+                    yours to come up consistently is what we help with.
+                  </p>
+                </>
               ) : (
                 <div className="none">
-                  No clear rival names came up this time — but that can change as
-                  more locals start asking AI for recommendations.
+                  No specific shop names came up clearly this time — but AI answers
+                  change day to day, and that can shift quickly. What matters is
+                  making sure yours is the name that comes up.
                 </div>
               )}
             </div>
