@@ -5,6 +5,74 @@
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+// --- Rate limiting & abuse protection ---------------------------------------
+// Serverless functions don't share memory reliably between instances, so this
+// is a best-effort limiter: it catches the common cases (one visitor hammering
+// the scan, or a sudden flood hitting a single warm instance). The hard backstop
+// is the spend cap set in each AI provider's own dashboard.
+//
+// Tunable limits:
+const RATE = {
+  perIpPerHour: 5, // max scans from one IP per rolling hour
+  perIpCooldownMs: 8000, // min gap between scans from the same IP
+  globalPerHour: 200, // rough ceiling on total scans per instance per hour
+};
+
+// In-memory stores (reset when the instance recycles — acceptable for now).
+const ipHits = new Map(); // ip -> [timestamps]
+const ipLast = new Map(); // ip -> last timestamp
+let globalHits = []; // timestamps of all scans on this instance
+
+function getClientIp(req) {
+  // Vercel forwards the real client IP in these headers.
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) return xff.split(",")[0].trim();
+  return req.headers.get("x-real-ip") || "unknown";
+}
+
+// Returns { ok: true } or { ok: false, reason, retryAfter }.
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const hourAgo = now - 60 * 60 * 1000;
+
+  // Global ceiling.
+  globalHits = globalHits.filter((t) => t > hourAgo);
+  if (globalHits.length >= RATE.globalPerHour) {
+    return { ok: false, reason: "busy" };
+  }
+
+  // Per-IP cooldown (rapid repeat-fire).
+  const last = ipLast.get(ip) || 0;
+  if (now - last < RATE.perIpCooldownMs) {
+    return { ok: false, reason: "cooldown" };
+  }
+
+  // Per-IP hourly quota.
+  const hits = (ipHits.get(ip) || []).filter((t) => t > hourAgo);
+  if (hits.length >= RATE.perIpPerHour) {
+    return { ok: false, reason: "quota" };
+  }
+
+  // Record this hit.
+  hits.push(now);
+  ipHits.set(ip, hits);
+  ipLast.set(ip, now);
+  globalHits.push(now);
+
+  // Opportunistic cleanup so the maps don't grow unbounded.
+  if (ipHits.size > 5000) {
+    for (const [k, v] of ipHits) {
+      const fresh = v.filter((t) => t > hourAgo);
+      if (fresh.length === 0) ipHits.delete(k);
+      else ipHits.set(k, fresh);
+    }
+  }
+
+  return { ok: true };
+}
+// ---------------------------------------------------------------------------
+
+
 // Build the set of customer-style queries for a given town/area.
 function buildQueries(town) {
   const t = town.trim();
@@ -349,6 +417,22 @@ const MODELS = [
 ];
 
 export async function POST(req) {
+  // Rate-limit before doing any paid API work.
+  const ip = getClientIp(req);
+  const limit = checkRateLimit(ip);
+  if (!limit.ok) {
+    const messages = {
+      cooldown: "Please wait a few seconds before running another check.",
+      quota:
+        "You've run several checks in the last hour. Please try again a little later.",
+      busy: "We're handling a lot of checks right now — please try again shortly.",
+    };
+    return Response.json(
+      { error: messages[limit.reason] || "Please try again shortly." },
+      { status: 429 }
+    );
+  }
+
   let body;
   try {
     body = await req.json();
@@ -362,6 +446,15 @@ export async function POST(req) {
   if (!shopName || !town) {
     return Response.json(
       { error: "Please enter both your shop name and town." },
+      { status: 400 }
+    );
+  }
+
+  // Reject obviously junk input (e.g. a single character, or no letters) before
+  // spending on API calls.
+  if (shopName.length < 2 || town.length < 2 || !/[a-zA-Z]/.test(shopName)) {
+    return Response.json(
+      { error: "Please enter a valid shop name and town." },
       { status: 400 }
     );
   }
