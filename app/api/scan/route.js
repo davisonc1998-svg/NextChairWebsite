@@ -76,12 +76,20 @@ function checkRateLimit(ip) {
 // Build the set of customer-style queries for a given town/area.
 function buildQueries(town) {
   const t = town.trim();
+  const instruction =
+    ` After your answer, on a new line, list ONLY the actual barbershop ` +
+    `business names you named above, in this exact format: ` +
+    `SHOPS: name one | name two | name three. ` +
+    `Include only real named barbershops or salons — no generic advice, ` +
+    `no directories (Google, Yelp, Treatwell), no phone numbers, no areas. ` +
+    `If you didn't name any specific shops, write: SHOPS: none.`;
   return [
-    `Best barbershop in ${t}?`,
-    `Where can I get a good skin fade in ${t}?`,
-    `Recommend a top-rated barber near ${t}.`,
-    `I'm new to ${t} and need a reliable barber for regular haircuts. Any suggestions?`,
-    `Best place for a men's haircut and beard trim in ${t}?`,
+    `Best barbershop in ${t}?` + instruction,
+    `Where can I get a good skin fade in ${t}?` + instruction,
+    `Recommend a top-rated barber near ${t}.` + instruction,
+    `I'm new to ${t} and need a reliable barber for regular haircuts. Any suggestions?` +
+      instruction,
+    `Best place for a men's haircut and beard trim in ${t}?` + instruction,
   ];
 }
 
@@ -142,161 +150,63 @@ function isMentioned(responseText, shopName) {
   return false;
 }
 
-// Extract a shortlist of competitor barbershop names the model recommended.
+// Extract competitor barbershop names from a model response.
 //
-// AI models almost always present recommendations as a list where the name is
-// the emphasised lead of each item, e.g.:
-//   "1. **Sharp & Co Barbers** - known for fades"
-//   "- Aatos Barbershop: great for walk-ins"
-//   "* The Gentleman's Cut — classic cuts"
-// So instead of grabbing any capitalised phrase (which catches place names and
-// stray words), we look specifically for the lead name of each list item and
-// then filter hard against non-business phrases.
+// We instruct each model (in the query) to end its answer with a structured
+// block: "SHOPS: name one | name two | name three" (or "SHOPS: none"). We parse
+// only that block, which is far more reliable than mining names from free prose.
+// A light sanity filter still drops any obvious non-shop entries that slip in.
 function extractCompetitors(responseText, shopName, max = 3) {
   if (!responseText) return [];
-  const selfCore = normalise(shopName);
 
-  // Words/phrases that indicate something is NOT a shop name (areas, directions,
-  // generic descriptors, common list intros).
-  const banned = new Set([
-    "north", "south", "east", "west", "central", "greater", "the",
-    "london", "city", "town", "area", "areas", "nearby", "near", "local",
-    "locals", "region", "district", "borough", "neighbourhood", "neighborhood",
-    "check", "note", "here", "there", "these", "those", "some", "many",
-    "several", "based", "however", "please", "while", "although", "google",
-    "reviews", "review", "reddit", "yelp", "recommendation", "recommendations",
-    "option", "options", "consider", "additionally", "unfortunately", "overall",
-    "best", "top", "popular", "great", "good", "reputable", "known", "barbershops",
-    "barbers", "haircuts", "services", "prices", "booking", "online", "walk",
-    // Days, contact labels, map/hours references — common in Gemini output.
-    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
-    "sunday", "contact", "phone", "tel", "telephone", "hours", "opening",
-    "address", "maps", "map", "website", "email", "call", "directions",
-    "rating", "ratings", "stars", "star", "closed", "open", "appointment",
-    "appointments", "location", "locations", "price", "cost", "from", "to",
+  // Find the SHOPS: block. Require it to be a standalone token (start of line
+  // or preceded by whitespace) so it doesn't match inside "barberSHOPS:".
+  const match = responseText.match(/(?:^|\s)SHOPS:\s*(.+)/i);
+  if (!match) return [];
+
+  let list = match[1].trim();
+
+  // "none" (any casing/punctuation) means the model named no specific shops.
+  if (/^none/i.test(list.replace(/[^a-zA-Z]/g, ' ').trim())) return [];
+
+  const selfNorm = normalise(shopName);
+
+  // Reject entries that are clearly not shop names even inside the block.
+  const bannedExact = new Set([
+    'none', 'social media', 'google', 'google maps', 'yelp', 'treatwell',
+    'facebook', 'instagram', 'nearby shops', 'local shops', 'ask for a trial cut',
+    'ask for recommendations', 'visit nearby shops', 'recommendations',
+    'trial cut', 'reviews', 'directories', 'search online', 'word of mouth',
   ]);
 
-  // Common generic multi-word phrases to reject outright (normalised).
-  const bannedPhrases = new Set([
-    "local barbershops", "local barbers", "north london", "south london",
-    "east london", "west london", "central london", "greater london",
-    "the area", "your area", "this area", "the city", "walk ins", "walk in",
-    "google reviews", "customer reviews", "opening hours", "book online",
-    "google maps", "monday friday", "monday saturday", "opening times",
-    "phone number", "contact number", "getting there", "how to",
-  ]);
-
-  const candidates = [];
-
-  // Split into lines and pull the "lead name" from each list-style line.
-  const lines = responseText.split(/\r?\n/);
-  for (const line of lines) {
-    let l = line.trim();
-    if (!l) continue;
-
-    // Strip common list markers: "1.", "2)", "-", "*", "•"
-    l = l.replace(/^\s*(?:\d+[.)]|[-*•])\s*/, "");
-
-    // Skip "label: value" lines where the label is a field name (Contact:,
-    // Hours:, Address:, Phone:, etc.) — the text before the colon is not a shop.
-    const colonMatch = l.match(/^([A-Za-z][A-Za-z\s]{0,15}?):\s/);
-    if (colonMatch) {
-      const label = normalise(colonMatch[1]);
-      const labelFields = new Set([
-        "contact", "phone", "tel", "telephone", "hours", "opening",
-        "opening hours", "address", "website", "email", "rating", "ratings",
-        "location", "directions", "price", "prices", "note", "notes", "tip",
-        "tips", "hint", "why", "services", "specialties", "specialities",
-      ]);
-      if (labelFields.has(label)) continue;
-    }
-
-    // Take the part before the first separator (–, -, :, —, or a comma that
-    // precedes a description). The name is almost always first.
-    let namePart = l.split(/\s+[–—-]\s+|:\s+/)[0].trim();
-
-    // Remove markdown emphasis markers ** __ around the name.
-    namePart = namePart.replace(/[*_`#]/g, "").trim();
-
-    // Reject anything containing digits — phone numbers, addresses, times,
-    // ratings ("4.5 stars"), price ("£15"). Real shop names rarely need them.
-    if (/\d/.test(namePart)) continue;
-
-    // Cut off trailing description that sometimes follows without a separator
-    // (keep at most the first 5 words — real shop names are short).
-    const words = namePart.split(/\s+/).filter(Boolean);
-    if (words.length > 6) continue; // whole line, not a name — skip
-    const name = words.join(" ").trim();
-
-    if (name.length < 3 || name.length > 45) continue;
-
-    const n = normalise(name);
-    if (!n) continue;
-
-    // Reject self-mentions.
-    if (n === selfCore || (selfCore && (n.includes(selfCore) || selfCore.includes(n)))) continue;
-
-    // Reject banned exact phrases.
-    if (bannedPhrases.has(n)) continue;
-
-    // Reject if the candidate contains a map/directory/action reference anywhere.
-    const junkSubstrings = [
-      "google maps", "google map", "find them", "find it", "visit them",
-      "check google", "on google", "see google", "book now", "call now",
-      "more options", "click here", "learn more",
-    ];
-    if (junkSubstrings.some((j) => n.includes(j))) continue;
-
-    // The name must contain at least one capitalised word (proper noun).
-    const hasCap = /[A-Z]/.test(name);
-    if (!hasCap) continue;
-
-    // Reject if EVERY significant word is banned (i.e. it's just area/generic words).
-    const nWords = n.split(" ").filter((w) => w.length > 1);
-    const meaningful = nWords.filter((w) => !banned.has(w));
-    if (meaningful.length === 0) continue;
-
-    // Reject if it's a single banned word or a bare place/direction.
-    if (nWords.length === 1 && banned.has(nWords[0])) continue;
-
-    // Reject sentence fragments: if the phrase contains common verbs/filler,
-    // it's a description, not a name.
-    const fragmentWords = new Set([
-      "are", "is", "was", "has", "have", "offers", "provides", "listings",
-      "plentiful", "many", "options", "here", "available", "located", "found",
-      "include", "includes", "such", "well", "very", "quite", "also", "more",
-    ]);
-    if (nWords.some((w) => fragmentWords.has(w))) continue;
-
-    // Require at least one "strong" proper-noun-ish word: a capitalised word
-    // that isn't a banned area/generic term. This is the key filter that keeps
-    // real names ("Fade Factory") and drops area phrases ("North London").
-    const rawWords = name.split(/\s+/);
-    const strongProperNoun = rawWords.some((w) => {
-      const clean = w.replace(/[^\w&]/g, "");
-      if (clean.length < 2) return false;
-      const isCap = /^[A-Z]/.test(clean);
-      return isCap && !banned.has(clean.toLowerCase());
+  const names = list
+    .split('|')
+    .map((s) => s.replace(/[*_`#"]/g, '').trim())
+    .filter(Boolean)
+    .filter((name) => {
+      const n = normalise(name);
+      if (!n || n.length < 3 || name.length > 45) return false;
+      if (bannedExact.has(n)) return false;
+      // Drop self-mentions.
+      if (selfNorm && (n === selfNorm || n.includes(selfNorm) || selfNorm.includes(n))) return false;
+      // Drop anything with digits (phone/address fragments).
+      if (/\d/.test(name)) return false;
+      // Must contain a capital letter (proper noun) somewhere.
+      if (!/[A-Z]/.test(name)) return false;
+      return true;
     });
-    if (!strongProperNoun) continue;
 
-    candidates.push(name);
-  }
-
-  // Score: prefer names that look like barbershops, then de-duplicate.
-  const hints = ["barber", "cut", "cutz", "fade", "grooming", "gents",
-    "chair", "blade", "razor", "trim", "clipper", "sharp", "shave", "co"];
+  // De-duplicate (case-insensitive), preserve order, cap at max.
   const seen = new Set();
-  const scored = [];
-  for (const name of candidates) {
+  const out = [];
+  for (const name of names) {
     const n = normalise(name);
     if (seen.has(n)) continue;
     seen.add(n);
-    const score = hints.some((h) => n.includes(h)) ? 1 : 0;
-    scored.push({ name, score });
+    out.push(name);
+    if (out.length >= max) break;
   }
-  scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, max).map((x) => x.name);
+  return out;
 }
 
 // --- Individual model callers. Each returns { text } or throws. ---
