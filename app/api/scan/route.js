@@ -336,6 +336,57 @@ const MODELS = [
   { id: "perplexity", label: "Perplexity", call: callPerplexity },
 ];
 
+// Geocode the searched town to a lat/long using Places Text Search, so we can
+// measure real distance to each candidate rather than relying on address text.
+// Returns { lat, lng } or null.
+async function geocodeTown(town) {
+  const key = process.env.GOOGLE_PLACES_API_KEY;
+  if (!key) return null;
+  try {
+    const res = await fetch(
+      "https://places.googleapis.com/v1/places:searchText",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": key,
+          "X-Goog-FieldMask": "places.location,places.formattedAddress",
+        },
+        body: JSON.stringify({
+          textQuery: town,
+          maxResultCount: 1,
+          languageCode: "en",
+        }),
+      }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const loc = data.places?.[0]?.location;
+    if (!loc || typeof loc.latitude !== "number") return null;
+    return { lat: loc.latitude, lng: loc.longitude };
+  } catch (e) {
+    console.error("GEOCODE_ERROR:", e?.message || String(e));
+    return null;
+  }
+}
+
+// Great-circle distance between two lat/long points, in miles (Haversine).
+function distanceMiles(a, b) {
+  const R = 3958.8; // Earth radius in miles
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+// How close a competitor must be to count as genuinely local (miles).
+const LOCAL_RADIUS_MILES = 2;
+
 // --- Google Places verification ---------------------------------------------
 // Each AI-suggested competitor is checked against Google Places. We keep a name
 // only if Places finds a real, currently-operational business matching that name
@@ -343,7 +394,7 @@ const MODELS = [
 //
 // Uses the Places API (New) Text Search endpoint. Fails safe: if the key is
 // missing or a lookup errors, that candidate is dropped (better blank than wrong).
-async function verifyCompetitor(name, town) {
+async function verifyCompetitor(name, town, townCoords) {
   const key = process.env.GOOGLE_PLACES_API_KEY;
   if (!key) return null; // No key → can't verify → drop (fail safe).
 
@@ -376,40 +427,24 @@ async function verifyCompetitor(name, town) {
       return null;
     }
 
-    const address = (place.formattedAddress || "").toLowerCase();
-    const townLc = town.toLowerCase().trim();
-
-    // The search query already constrains to "<name> barber <town>", so Google's
-    // top result is location-relevant. We therefore trust it by default, and only
-    // reject when the address clearly points to a DIFFERENT well-known UK city
-    // than the one searched (guards against e.g. a Manchester shop for a London
-    // search) OR to a different country.
-    const townParts = townLc.split(/[,\s]+/).filter((p) => p.length >= 3);
-
-    // If any part of the searched town appears in the address, it's a clear match.
-    const directMatch =
-      townParts.length === 0 || townParts.some((p) => address.includes(p));
-
-    if (!directMatch) {
-      // No direct town match — check it's not in an obviously different UK city.
-      const otherCities = [
-        "manchester", "birmingham", "leeds", "liverpool", "glasgow",
-        "edinburgh", "bristol", "sheffield", "cardiff", "newcastle",
-        "nottingham", "leicester", "coventry", "belfast", "brighton",
-      ];
-      const searchedCity = townParts.join(" ");
-      const inOtherCity = otherCities.some(
-        (c) => address.includes(c) && !searchedCity.includes(c)
-      );
-      // Also require it to at least be in the UK.
-      const inUK =
-        address.includes("uk") ||
-        address.includes("united kingdom") ||
-        /\b[a-z]{1,2}\d/.test(address); // rough UK postcode pattern
-      if (inOtherCity || !inUK) return null;
-      // Otherwise: no direct match but not clearly wrong-city and looks UK —
-      // accept, trusting Google's location-constrained relevance.
+    // Proximity check: keep only shops genuinely near the searched area.
+    // Distance is far more reliable than address text — "London" is huge, but
+    // 2 miles is 2 miles regardless of how Google words the address.
+    const loc = place.location;
+    if (townCoords && loc && typeof loc.latitude === "number") {
+      const miles = distanceMiles(townCoords, {
+        lat: loc.latitude,
+        lng: loc.longitude,
+      });
+      if (miles > LOCAL_RADIUS_MILES) return null; // Too far → not a local rival.
+    } else if (townCoords) {
+      // We had town coords but this place has no usable location → can't confirm
+      // proximity → drop (fail safe: better to omit than mislead).
+      return null;
     }
+    // If we couldn't geocode the town at all (townCoords null), we fall through
+    // and accept the Places result on relevance alone, since the search query
+    // already included the town.
 
     // Return the canonical name Google has, which is cleaner than the AI's text.
     return place.displayName?.text || name;
@@ -422,11 +457,14 @@ async function verifyCompetitor(name, town) {
 // Verify a list of candidate competitors in parallel, preserving order and
 // de-duplicating by the canonical name Google returns.
 async function verifyCompetitors(candidates, town, shopName) {
+  // Geocode the searched town once so we can measure distance to each candidate.
+  const townCoords = await geocodeTown(town);
+
   const results = await Promise.all(
     candidates.map(async (c) => ({
       original: c.name,
       count: c.count,
-      verified: await verifyCompetitor(c.name, town),
+      verified: await verifyCompetitor(c.name, town, townCoords),
     }))
   );
 
