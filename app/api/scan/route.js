@@ -121,6 +121,12 @@ function isMentioned(responseText, shopName) {
   // Direct full-name match first.
   if (resp.includes(full)) return true;
 
+  // Space-insensitive match: "Mancave" vs "Man Cave", "Hair Tonic" vs "Hairtonic".
+  // We compare with all spaces removed so joined/split spellings both match.
+  const respNoSpace = resp.replace(/\s+/g, "");
+  const fullNoSpace = full.replace(/\s+/g, "");
+  if (fullNoSpace.length >= 4 && respNoSpace.includes(fullNoSpace)) return true;
+
   // Strip generic barbershop words to get the distinctive core of the name.
   const stop = new Set([
     "the", "barbers", "barber", "barbershop", "barbershops", "shop",
@@ -132,6 +138,10 @@ function isMentioned(responseText, shopName) {
   // Whole-core contiguous match.
   const core = coreWords.join(" ");
   if (core.length >= 3 && resp.includes(core)) return true;
+
+  // Space-insensitive core match (e.g. "Man Cave" core vs "Mancave" in response).
+  const coreNoSpace = core.replace(/\s+/g, "");
+  if (coreNoSpace.length >= 4 && respNoSpace.includes(coreNoSpace)) return true;
 
   // Word-level stemmed match: every distinctive word must appear (stemmed)
   // somewhere in the response. This catches "Gentleman's Cut" vs "Gentlemans Cut".
