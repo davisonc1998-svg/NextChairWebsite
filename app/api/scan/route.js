@@ -379,14 +379,37 @@ async function verifyCompetitor(name, town) {
     const address = (place.formattedAddress || "").toLowerCase();
     const townLc = town.toLowerCase().trim();
 
-    // Location sanity check: the town the user searched should appear somewhere
-    // in the verified address. Handles "Islington, London" by checking each part.
+    // The search query already constrains to "<name> barber <town>", so Google's
+    // top result is location-relevant. We therefore trust it by default, and only
+    // reject when the address clearly points to a DIFFERENT well-known UK city
+    // than the one searched (guards against e.g. a Manchester shop for a London
+    // search) OR to a different country.
     const townParts = townLc.split(/[,\s]+/).filter((p) => p.length >= 3);
-    const townMatches =
-      townParts.length === 0 ||
-      townParts.some((part) => address.includes(part));
 
-    if (!townMatches) return null; // Real business, but wrong location → drop.
+    // If any part of the searched town appears in the address, it's a clear match.
+    const directMatch =
+      townParts.length === 0 || townParts.some((p) => address.includes(p));
+
+    if (!directMatch) {
+      // No direct town match — check it's not in an obviously different UK city.
+      const otherCities = [
+        "manchester", "birmingham", "leeds", "liverpool", "glasgow",
+        "edinburgh", "bristol", "sheffield", "cardiff", "newcastle",
+        "nottingham", "leicester", "coventry", "belfast", "brighton",
+      ];
+      const searchedCity = townParts.join(" ");
+      const inOtherCity = otherCities.some(
+        (c) => address.includes(c) && !searchedCity.includes(c)
+      );
+      // Also require it to at least be in the UK.
+      const inUK =
+        address.includes("uk") ||
+        address.includes("united kingdom") ||
+        /\b[a-z]{1,2}\d/.test(address); // rough UK postcode pattern
+      if (inOtherCity || !inUK) return null;
+      // Otherwise: no direct match but not clearly wrong-city and looks UK —
+      // accept, trusting Google's location-constrained relevance.
+    }
 
     // Return the canonical name Google has, which is cleaner than the AI's text.
     return place.displayName?.text || name;
@@ -398,7 +421,7 @@ async function verifyCompetitor(name, town) {
 
 // Verify a list of candidate competitors in parallel, preserving order and
 // de-duplicating by the canonical name Google returns.
-async function verifyCompetitors(candidates, town) {
+async function verifyCompetitors(candidates, town, shopName) {
   const results = await Promise.all(
     candidates.map(async (c) => ({
       original: c.name,
@@ -407,11 +430,29 @@ async function verifyCompetitors(candidates, town) {
     }))
   );
 
+  // Normalise the searched shop name so we can exclude it even if Google returns
+  // a slightly different canonical spelling.
+  const selfNorm = normalise(shopName);
+  const selfNoSpace = selfNorm.replace(/\s+/g, "");
+
   const seen = new Set();
   const out = [];
   for (const r of results) {
     if (!r.verified) continue;
-    const key = r.verified.toLowerCase().trim();
+    const vNorm = normalise(r.verified);
+    const vNoSpace = vNorm.replace(/\s+/g, "");
+    // Exclude the searched shop itself (fuzzy, space-insensitive).
+    if (
+      selfNorm &&
+      (vNorm === selfNorm ||
+        vNorm.includes(selfNorm) ||
+        selfNorm.includes(vNorm) ||
+        (selfNoSpace.length >= 4 && vNoSpace.includes(selfNoSpace)) ||
+        (vNoSpace.length >= 4 && selfNoSpace.includes(vNoSpace)))
+    ) {
+      continue;
+    }
+    const key = vNorm;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({ name: r.verified, count: r.count });
@@ -517,7 +558,7 @@ export async function POST(req) {
 
   // Verify each candidate is a real, operational business in the searched town.
   // Hallucinated or wrong-city names are dropped (fail safe → blank not wrong).
-  const verified = await verifyCompetitors(candidateCompetitors, town);
+  const verified = await verifyCompetitors(candidateCompetitors, town, shopName);
   const topCompetitors = verified.slice(0, 5);
 
   const availableModels = modelResults.filter((m) => m.available);
